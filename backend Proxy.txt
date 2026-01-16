@@ -1,0 +1,68 @@
+/**
+ * GCP ACE Exam Simulator - Secure Backend Proxy
+ */
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
+
+const app = express();
+
+// 1. Rate Limiting
+const limiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 10, 
+    message: { error: 'Too many requests. Please try again in an hour.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// 2. CORS Configuration
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*'; 
+app.use(cors({
+    origin: ALLOWED_ORIGIN,
+    methods: ['POST'],
+    allowedHeaders: ['Content-Type']
+}));
+
+app.use(express.json());
+
+const API_KEY = process.env.GEMINI_API_KEY;
+const MODEL_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+
+app.post('/api/generate-exam', limiter, async (req, res) => {
+    // 3. Input Validation
+    if (!req.body || !req.body.contents) {
+        return res.status(400).json({ error: 'Invalid request payload' });
+    }
+
+    if (!API_KEY) {
+        console.error('CRITICAL: Missing GEMINI_API_KEY in environment');
+        return res.status(500).json({ error: 'Server configuration error' });
+    }
+
+    try {
+        const response = await axios.post(`${MODEL_URL}?key=${API_KEY}`, req.body, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000 
+        });
+        
+        res.json(response.data);
+    } catch (error) {
+        const statusCode = error.response?.status || 500;
+        const errorData = error.response?.data;
+        
+        console.error(`Gemini API Error (${statusCode}):`, JSON.stringify(errorData));
+        
+        res.status(statusCode).json({ 
+            error: 'Failed to generate exam content',
+            message: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+        });
+    }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`✅ Production-ready proxy live on port ${PORT}`);
+});

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCP ACE Certification Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap');
+        body { font-family: 'Google Sans', sans-serif; background-color: #f8f9fa; color: #3c4043; }
+        .g-card { background: white; border: 1px solid #dadce0; border-radius: 8px; }
+        .btn-primary { background: #1a73e8; color: white; padding: 10px 24px; border-radius: 4px; font-weight: 500; transition: background 0.2s; }
+        .btn-primary:hover { background: #1765cc; }
+        .btn-outline { border: 1px solid #dadce0; padding: 10px 24px; border-radius: 4px; font-weight: 500; color: #1a73e8; }
+        .option-btn { border: 1px solid #dadce0; transition: all 0.2s; text-align: left; }
+        .option-btn.selected { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
+        .loading-spinner { border: 3px solid #f3f3f3; border-top: 3px solid #1a73e8; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="p-4 md:p-12">
+
+<div id="app" class="max-w-4xl mx-auto">
+    <!-- START PAGE -->
+    <div id="start-page" class="g-card p-10 text-center shadow-sm">
+        <img src="https://www.gstatic.com/images/branding/googlelogo/svg/googlelogo_clr_74x24px.svg" alt="Google" class="mx-auto mb-6">
+        <h1 class="text-3xl font-bold mb-4">Associate Cloud Engineer</h1>
+        <p class="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
+            Dynamic practice exam powered by Gemini. Scenarios covering IAM, Networking, GKE, and Storage.
+        </p>
+        <button id="start-btn" onclick="generateExam()" class="btn-primary text-lg px-12 py-4">Start Dynamic Exam</button>
+        <div id="loading-area" class="hidden mt-6 flex flex-col items-center">
+            <div class="loading-spinner mb-2"></div>
+            <p class="text-sm text-gray-500 italic">Connecting to secure proxy for exam synthesis...</p>
+        </div>
+    </div>
+
+    <!-- EXAM INTERFACE -->
+    <div id="exam-page" class="hidden">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold">ACE Practice Exam <span id="q-counter" class="text-sm font-normal ml-2"></span></h2>
+            <div id="timer" class="font-mono text-xl font-bold bg-white border px-4 py-1 rounded">120:00</div>
+        </div>
+        <div class="g-card p-8 shadow-md">
+            <div id="question-box">
+                <p id="question-text" class="text-xl leading-relaxed mb-8 font-medium"></p>
+                <div id="options-container" class="space-y-4"></div>
+            </div>
+            <div id="explanation-box" class="hidden mt-8 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
+                <p id="explanation-text" class="text-blue-900 text-sm"></p>
+            </div>
+            <div class="flex justify-between items-center mt-10 pt-6 border-t">
+                <button onclick="toggleHint()" class="text-blue-600 font-medium hover:underline text-sm">Review Answer</button>
+                <div class="flex gap-3">
+                    <button id="prev-btn" onclick="move(-1)" class="btn-outline">Back</button>
+                    <button id="next-btn" onclick="move(1)" class="btn-primary">Next</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div id="results-page" class="hidden g-card p-12 text-center shadow-lg">
+        <div id="score-ring" class="w-40 h-40 rounded-full border-[12px] border-blue-600 flex items-center justify-center mx-auto mb-6">
+            <span id="final-score" class="text-4xl font-bold">0%</span>
+        </div>
+        <button onclick="location.reload()" class="btn-primary">Try Another Set</button>
+    </div>
+</div>
+
+<script>
+    const API_ENDPOINT = "http://localhost:3000/api/generate-exam";
+    let examData = [];
+    let currentIdx = 0;
+    let userSelections = [];
+    let timerSeconds = 7200;
+
+    async function generateExam() {
+        document.getElementById('start-btn').classList.add('hidden');
+        document.getElementById('loading-area').classList.remove('hidden');
+
+        const systemPrompt = `Generate 10 ACE exam questions. JSON array of objects: { "q": "Question", "o": ["A", "B", "C", "D"], "a": index, "e": "explanation" }.`;
+
+        try {
+            const response = await fetch(API_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: "Generate 10 ACE exam questions now." }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] }
+                })
+            });
+
+            if (!response.ok) throw new Error(await response.text());
+
+            const result = await response.json();
+            examData = JSON.parse(result.candidates[0].content.parts[0].text);
+            userSelections = new Array(examData.length).fill(null);
+            
+            document.getElementById('start-page').classList.add('hidden');
+            document.getElementById('exam-page').classList.remove('hidden');
+            renderQuestion();
+            startTimer();
+        } catch (error) {
+            console.error(error);
+            alert("API Error: Check if backend is running.");
+            document.getElementById('start-btn').classList.remove('hidden');
+            document.getElementById('loading-area').classList.add('hidden');
+        }
+    }
+
+    function renderQuestion() {
+        const item = examData[currentIdx];
+        document.getElementById('question-text').innerText = item.q;
+        document.getElementById('q-counter').innerText = `(${currentIdx + 1}/${examData.length})`;
+        
+        const container = document.getElementById('options-container');
+        container.innerHTML = '';
+        
+        item.o.forEach((opt, i) => {
+            const btn = document.createElement('button');
+            btn.className = `option-btn w-full p-4 rounded-lg flex gap-3 ${userSelections[currentIdx] === i ? 'selected' : ''}`;
+            btn.innerHTML = `<span class="font-bold opacity-50">${String.fromCharCode(65 + i)}</span> <span>${opt}</span>`;
+            btn.onclick = () => { userSelections[currentIdx] = i; renderQuestion(); };
+            container.appendChild(btn);
+        });
+
+        document.getElementById('prev-btn').style.visibility = currentIdx === 0 ? 'hidden' : 'visible';
+        document.getElementById('next-btn').innerText = currentIdx === examData.length - 1 ? 'Submit' : 'Next';
+        document.getElementById('explanation-box').classList.add('hidden');
+    }
+
+    function move(dir) {
+        if (dir === 1 && currentIdx === examData.length - 1) {
+            finishExam();
+            return;
+        }
+        currentIdx += dir;
+        renderQuestion();
+    }
+
+    function toggleHint() {
+        const box = document.getElementById('explanation-box');
+        const text = document.getElementById('explanation-text');
+        const item = examData[currentIdx];
+        text.innerHTML = `<strong>Correct: ${String.fromCharCode(65 + item.a)}</strong><br>${item.e}`;
+        box.classList.toggle('hidden');
+    }
+
+    function startTimer() {
+        setInterval(() => {
+            timerSeconds--;
+            const m = Math.floor(timerSeconds / 60);
+            const s = timerSeconds % 60;
+            document.getElementById('timer').innerText = `${m}:${s.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    function finishExam() {
+        document.getElementById('exam-page').classList.add('hidden');
+        document.getElementById('results-page').classList.remove('hidden');
+        let correct = 0;
+        userSelections.forEach((sel, i) => { if (sel === examData[i].a) correct++; });
+        document.getElementById('final-score').innerText = `${Math.round((correct / examData.length) * 100)}%`;
+    }
+</script>
+</body>
+</html>
